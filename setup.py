@@ -12,8 +12,7 @@ classifiers = [
 
 setuptools.setup(
     name="codethemes",
-    version="0.1.2",
-    python_requires='>=3.*',
+    version="0.1.3",
     author="saberd",
     author_email="mail@saberd.com",
     description="Import visual studio themes as linux terminal theme profiles",
