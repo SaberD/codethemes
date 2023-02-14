@@ -12,6 +12,7 @@ from collections import OrderedDict
 
 parser = argparse.ArgumentParser(description='Import visual studio themes as linux terminal theme profiles')
 parser.add_argument("-v", "--verbose", help="increase output verbosity", action="store_true")
+parser.add_argument("-r", "--reset", help="deletes all terminal themes and resets to default colors", action="store_true")
 args = parser.parse_args()
 
 def uuidgen():
@@ -30,7 +31,7 @@ def dset(dconf_path):
 
 def dconf_get():
     spath = "/org/gnome/terminal/legacy/profiles:/"
-    cmd = ("dconf dump %s /" % spath)
+    cmd = ("dconf dump %s" % spath)
     p = subprocess.Popen( cmd, shell=True, stdout=subprocess.PIPE )
     (out, err) = p.communicate()
     return out
@@ -51,15 +52,19 @@ def hex2rgb(color):
     return ("rgb(%d,%d,%d)" % rgb)
 
 def importer():
+    # check if reset
+    if args.reset:
+        reset()
+        print("deleted all terminal themes and reset the terminal to default colors")
+        return
     # get current dconf
     s_out = dconf_get().decode("utf-8")
     if s_out:
-        confjson = dconfjson.dconf_json(s_out)
+        confJson = dconfjson.dconf_json(s_out)
     else:
-        confjson = dconfjson.dconf_json(EMPTY_CONF)
+        confJson = dconfjson.dconf_json(EMPTY_CONF)
 
     extensions_folders = []
-    # get vscode default themes
     # snap
     extensions_folders.append("/snap/code/current/usr/share/code/resources/app/extensions/")
     # dnf(fedora), 
@@ -69,6 +74,7 @@ def importer():
     
     new_profile_added = False
     theme_files = []
+
     for extensions_folder in extensions_folders:
         for extension in glob("%s*" % extensions_folder):
             extension_name = os.path.basename(extension)
@@ -100,9 +106,7 @@ def importer():
         else:
             name = " ".join(os.path.basename(theme_file).split("-")[:-1])
             
-        if "colors" in data:
-            colors = data["colors"]
-        else:
+        if "colors" not in data:
             if args.verbose:
                 print("%sCould not find colors -- %s%s" % ("\033[91m", "\033[0m", name))
             continue
@@ -136,40 +140,55 @@ def importer():
         foreground = mapping["terminal.foreground"]
         
         # check if theme already exists
-        exists = False
-        for key in confjson:
-            if "visible-name" in confjson[key]:
-                if confjson[key]["visible-name"][1:-1] == name:
-                    exists = True
-                    uuid = key
-                    if args.verbose:
-                        print("%(y)sProfile exists --%(e)s %(n)s %(y)s-- %(f)s%(e)s" % {"y":"\033[93m", "e":"\033[0m", "n":name, "f":theme_file})
-        if not exists:
+        if not confExists(name, confJson, theme_file):
             # add uuid to list
-            uuid = uuidgen()
-            confjson[""][" "]["list"] = "%s, '%s']" % (confjson[""][" "]["list"][:-1], uuid)
-            # add settings under uuid key
-            tmp_confjson= DCONF_DEFAULT.copy()
-            tmp_confjson["visible-name"] = "'%s'" % name
-            tmp_confjson["palette"] = palette
-            tmp_confjson["background-color"] = "'%s'" % hex2rgb(background)
-            tmp_confjson["foreground-color"] = "'%s'" % hex2rgb(foreground)             
-            confjson[":%s " % uuid] = tmp_confjson
-            print("%sInstalled%s  %s" % ("\033[92m", "\033[0m", name))
+            addUuid(name, background, foreground, palette, confJson)
             new_profile_added = True
+
     if not new_profile_added:
         print("%sNo new profiles added%s" % ("\033[93m", "\033[0m"))
 
     #check if first uuid is empty (happens when there were no previous profiles)
-    if confjson[""][" "]["list"][1] == ",":
-        confjson[""][" "]["list"] = "[" + confjson[""][" "]["list"][2:]
-    dconf = dconfjson.json_dconf(confjson)
+    if confJson[""][" "]["list"][1] == ",":
+        confJson[""][" "]["list"] = "[" + confJson[""][" "]["list"][2:]
+    dconf = dconfjson.json_dconf(confJson)
 
     # write to file
     with open("output.conf", "w") as fout:
         fout.write(dconf)
     # load into gnome settings
     dset("output.conf")
+
+def confExists(name, confjson, theme_file=""):
+    exists = False
+    for key in confjson:
+        if "visible-name" in confjson[key]:
+            if confjson[key]["visible-name"][1:-1] == name:
+                exists = True
+                if args.verbose:
+                    print("%(y)sProfile exists --%(e)s %(n)s %(y)s-- %(f)s%(e)s" % {"y":"\033[93m", "e":"\033[0m", "n":name, "f":theme_file})
+                return exists
+    return exists
+
+def addUuid(name, background, foreground, palette, confjson):
+    uuid = uuidgen()
+    confjson[""][" "]["list"] = "%s, '%s']" % (confjson[""][" "]["list"][:-1], uuid)
+    # add settings under uuid key
+    tmp_confjson= DCONF_DEFAULT.copy()
+    tmp_confjson["visible-name"] = "'%s'" % name
+    tmp_confjson["palette"] = palette
+    tmp_confjson["background-color"] = "'%s'" % hex2rgb(background)
+    tmp_confjson["foreground-color"] = "'%s'" % hex2rgb(foreground)             
+    confjson[":%s " % uuid] = tmp_confjson
+    print("%sInstalled%s  %s" % ("\033[92m", "\033[0m", name))
+
+def reset():
+    cmd = "dconf reset -f /org/gnome/terminal/legacy/profiles:/"
+    p = subprocess.Popen( cmd, shell=True, stdout=subprocess.PIPE)
+    (out, error) = p.communicate()
+    if out:
+        print(out.decode("utf-8"))
+    return
 
 # Default colors
 TERMINAL_COLOR_MAP_LIGHT = OrderedDict([
